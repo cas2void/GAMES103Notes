@@ -15,6 +15,7 @@ public class Rigid_Bunny : MonoBehaviour
 	float angular_decay	= 0.98f;				
 	float restitution 	= 0.5f;					// for collision
 
+	Vector3 gravity     = new Vector3(0.0f, -9.8f, 0.0f);
 
 	// Use this for initialization
 	void Start() 
@@ -22,47 +23,47 @@ public class Rigid_Bunny : MonoBehaviour
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
 		Vector3[] vertices = mesh.vertices;
 
-		float m=1;
-		mass=0;
-		for (int i=0; i<vertices.Length; i++) 
+		float m = 1;
+		mass = 0;
+		for (int i = 0; i < vertices.Length; i++) 
 		{
 			mass += m;
-			float diag=m*vertices[i].sqrMagnitude;
-			I_ref[0, 0]+=diag;
-			I_ref[1, 1]+=diag;
-			I_ref[2, 2]+=diag;
-			I_ref[0, 0]-=m*vertices[i][0]*vertices[i][0];
-			I_ref[0, 1]-=m*vertices[i][0]*vertices[i][1];
-			I_ref[0, 2]-=m*vertices[i][0]*vertices[i][2];
-			I_ref[1, 0]-=m*vertices[i][1]*vertices[i][0];
-			I_ref[1, 1]-=m*vertices[i][1]*vertices[i][1];
-			I_ref[1, 2]-=m*vertices[i][1]*vertices[i][2];
-			I_ref[2, 0]-=m*vertices[i][2]*vertices[i][0];
-			I_ref[2, 1]-=m*vertices[i][2]*vertices[i][1];
-			I_ref[2, 2]-=m*vertices[i][2]*vertices[i][2];
+			float diag = m * vertices[i].sqrMagnitude;
+			I_ref[0, 0] += diag;
+			I_ref[1, 1] += diag;
+			I_ref[2, 2] += diag;
+			I_ref[0, 0] -= m * vertices[i][0] * vertices[i][0];
+			I_ref[0, 1] -= m * vertices[i][0] * vertices[i][1];
+			I_ref[0, 2] -= m * vertices[i][0] * vertices[i][2];
+			I_ref[1, 0] -= m * vertices[i][1] * vertices[i][0];
+			I_ref[1, 1] -= m * vertices[i][1] * vertices[i][1];
+			I_ref[1, 2] -= m * vertices[i][1] * vertices[i][2];
+			I_ref[2, 0] -= m * vertices[i][2] * vertices[i][0];
+			I_ref[2, 1] -= m * vertices[i][2] * vertices[i][1];
+			I_ref[2, 2] -= m * vertices[i][2] * vertices[i][2];
 		}
 		I_ref [3, 3] = 1;
 	}
 	
 	Matrix4x4 Get_Cross_Matrix(Vector3 a)
 	{
-		//Get the cross product matrix of vector a
+		// Get the cross product matrix of vector a
 		Matrix4x4 A = Matrix4x4.zero;
 		A [0, 0] = 0; 
-		A [0, 1] = -a [2]; 
-		A [0, 2] = a [1]; 
-		A [1, 0] = a [2]; 
+		A [0, 1] = -a[2]; 
+		A [0, 2] = a[1]; 
+		A [1, 0] = a[2]; 
 		A [1, 1] = 0; 
-		A [1, 2] = -a [0]; 
-		A [2, 0] = -a [1]; 
-		A [2, 1] = a [0]; 
+		A [1, 2] = -a[0]; 
+		A [2, 0] = -a[1]; 
+		A [2, 1] = a[0]; 
 		A [2, 2] = 0; 
 		A [3, 3] = 1;
 		return A;
 	}
 
 	// In this function, update v and w by the impulse due to the collision with
-	//a plane <P, N>
+	// a plane <P, N>
 	void Collision_Impulse(Vector3 P, Vector3 N)
 	{
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
@@ -96,8 +97,8 @@ public class Rigid_Bunny : MonoBehaviour
 			Vector3 vni = Vector3.Dot(vi, N) * N;
 			Vector3 vti = vi - vni;
 
-			float mut = 0.5f;
-			float mun = 0.5f;
+			float mut = restitution;
+			float mun = restitution;
 			float a = Mathf.Max(1.0f - mut * (1.0f + mun) * vni.magnitude / vti.magnitude, 0.0f);
 
 			Vector3 vniNew = -mun * vni;
@@ -122,13 +123,15 @@ public class Rigid_Bunny : MonoBehaviour
 
 	void Update_Linear_Velocity()
 	{
-		Vector3 gravity = new Vector3(0.0f, -9.8f, 0.0f);
 		v += gravity * dt;
 		v *= linear_decay;
 	}
 
 	void Update_Angular_Velocity()
 	{
+		//
+		// Gravity do not create rotation
+		//
 		w *= angular_decay;
 	}
 
@@ -152,17 +155,24 @@ public class Rigid_Bunny : MonoBehaviour
 	// Update is called once per frame
 	void Update() 
 	{
-		//Game Control
-		if(Input.GetKey("r"))
+		// Game Control
+		if (Input.GetKey("r"))
 		{
-			transform.position = new Vector3 (0, 0.6f, 0);
+			transform.position = new Vector3(0, 0.6f, 0);
 			restitution = 0.5f;
-			launched=false;
+			launched = false;
 		}
-		if(Input.GetKey("l"))
+		if (Input.GetKey("l"))
 		{
-			v = new Vector3 (5, 2, 0);
-			launched=true;
+			v = new Vector3(5, 2, 0);
+
+			//
+			// Estimate v^[0.5] with gravity for Leapfrog integration.
+			// However, as v is initialized arbitrarily, I'll take this step as optional.
+			//
+			//v += gravity * dt * 0.5f;
+
+			launched = true;
 		}
 
 		// Part I: Update velocities
@@ -177,9 +187,9 @@ public class Rigid_Bunny : MonoBehaviour
 		Collision_Impulse(new Vector3(2, 0, 0), new Vector3(-1, 0, 0));
 
 		// Part III: Update position & orientation
-		//Update linear status
+		// Update linear status
 		Vector3 x    = transform.position;
-		//Update angular status
+		// Update angular status
 		Quaternion q = transform.rotation;
 
 		if (launched)
