@@ -108,12 +108,18 @@ public class Rigid_Bunny : MonoBehaviour
 
 			//
 			// Friction
+			// Decrease muN to reduce oscillation
 			//
-			float mut = restitution;
-			float mun = restitution;
-			float a = Mathf.Max(1.0f - mut * (1.0f + mun) * vni.magnitude / vti.magnitude, 0.0f);
+			float muT = restitution;
+			float muNScale = Mathf.Min(vni.magnitude, 1.0f);
+			if (muNScale < 0.16f)
+            {
+				muNScale = 0.0f;
+            }
+			float muN = restitution * muNScale;
+			float a = Mathf.Max(1.0f - muT * (1.0f + muN) * vni.magnitude / vti.magnitude, 0.0f);
 
-			Vector3 vniNew = -mun * vni;
+			Vector3 vniNew = -muN * vni;
 			Vector3 vtiNew = a * vti;
 			Vector3 viNew = vniNew + vtiNew;
 

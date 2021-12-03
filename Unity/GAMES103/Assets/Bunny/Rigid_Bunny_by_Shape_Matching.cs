@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 {
-	public bool launched = false;
+	bool launched = false;
 	Vector3[] X;
 	Vector3[] Q;
 	Vector3[] V;
