@@ -17,30 +17,35 @@ public class Rigid_Bunny : MonoBehaviour
 
 	Vector3 gravity     = new Vector3(0.0f, -9.8f, 0.0f);
 
+	Vector3[] original_vertices;                // original vertices of mesh
+
 	// Use this for initialization
 	void Start() 
 	{		
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
-		Vector3[] vertices = mesh.vertices;
+		//
+		// Cache vertex local positions for optimization
+		//
+		original_vertices = mesh.vertices;
 
 		float m = 1;
 		mass = 0;
-		for (int i = 0; i < vertices.Length; i++) 
+		for (int i = 0; i < original_vertices.Length; i++) 
 		{
 			mass += m;
-			float diag = m * vertices[i].sqrMagnitude;
+			float diag = m * original_vertices[i].sqrMagnitude;
 			I_ref[0, 0] += diag;
 			I_ref[1, 1] += diag;
 			I_ref[2, 2] += diag;
-			I_ref[0, 0] -= m * vertices[i][0] * vertices[i][0];
-			I_ref[0, 1] -= m * vertices[i][0] * vertices[i][1];
-			I_ref[0, 2] -= m * vertices[i][0] * vertices[i][2];
-			I_ref[1, 0] -= m * vertices[i][1] * vertices[i][0];
-			I_ref[1, 1] -= m * vertices[i][1] * vertices[i][1];
-			I_ref[1, 2] -= m * vertices[i][1] * vertices[i][2];
-			I_ref[2, 0] -= m * vertices[i][2] * vertices[i][0];
-			I_ref[2, 1] -= m * vertices[i][2] * vertices[i][1];
-			I_ref[2, 2] -= m * vertices[i][2] * vertices[i][2];
+			I_ref[0, 0] -= m * original_vertices[i][0] * original_vertices[i][0];
+			I_ref[0, 1] -= m * original_vertices[i][0] * original_vertices[i][1];
+			I_ref[0, 2] -= m * original_vertices[i][0] * original_vertices[i][2];
+			I_ref[1, 0] -= m * original_vertices[i][1] * original_vertices[i][0];
+			I_ref[1, 1] -= m * original_vertices[i][1] * original_vertices[i][1];
+			I_ref[1, 2] -= m * original_vertices[i][1] * original_vertices[i][2];
+			I_ref[2, 0] -= m * original_vertices[i][2] * original_vertices[i][0];
+			I_ref[2, 1] -= m * original_vertices[i][2] * original_vertices[i][1];
+			I_ref[2, 2] -= m * original_vertices[i][2] * original_vertices[i][2];
 		}
 		I_ref [3, 3] = 1;
 	}
@@ -66,14 +71,15 @@ public class Rigid_Bunny : MonoBehaviour
 	// a plane <P, N>
 	void Collision_Impulse(Vector3 P, Vector3 N)
 	{
-		Mesh mesh = GetComponent<MeshFilter>().mesh;
-		Vector3[] vertices = mesh.vertices;
 		Matrix4x4 rotationMatrix = Matrix4x4.Rotate(transform.rotation);
 
+		//
+		// Find all the vertice collided with the plane
+		//
 		int numCollidingVertices = 0;
 		Vector3 sumCollidingPosition = Vector3.zero;
 		Vector3 sumCollidingVelocity = Vector3.zero;
-		foreach (Vector3 position in vertices)
+		foreach (Vector3 position in original_vertices)
 		{
 			Vector3 rotatedDirection = rotationMatrix.MultiplyPoint3x4(position);
 			Vector3 vertexPosition = transform.position + rotatedDirection;
@@ -91,12 +97,18 @@ public class Rigid_Bunny : MonoBehaviour
 
 		if (numCollidingVertices > 0)
 		{
+			//
+			// Average of all collided vertices
+			//
 			Vector3 Rri = sumCollidingPosition / numCollidingVertices - transform.position;
 			Vector3 vi = sumCollidingVelocity / numCollidingVertices;
 
 			Vector3 vni = Vector3.Dot(vi, N) * N;
 			Vector3 vti = vi - vni;
 
+			//
+			// Friction
+			//
 			float mut = restitution;
 			float mun = restitution;
 			float a = Mathf.Max(1.0f - mut * (1.0f + mun) * vni.magnitude / vti.magnitude, 0.0f);
@@ -105,17 +117,31 @@ public class Rigid_Bunny : MonoBehaviour
 			Vector3 vtiNew = a * vti;
 			Vector3 viNew = vniNew + vtiNew;
 
+			//
+			// K = identity / mass - (Rri)* I^(-1) (Rri)*
+			//
 			float inversedMass = 1.0f / mass;
-			Matrix4x4 K = new Matrix4x4(new Vector4(inversedMass, 0, 0, 0), new Vector4(0, inversedMass, 0, 0), new Vector4(0, 0, inversedMass, 0), new Vector4(0, 0, 0, inversedMass));
+			Matrix4x4 K = new Matrix4x4(
+				new Vector4(inversedMass, 0, 0, 0), 
+				new Vector4(0, inversedMass, 0, 0), 
+				new Vector4(0, 0, inversedMass, 0), 
+				new Vector4(0, 0, 0, inversedMass));
 			Matrix4x4 crossMatrix = Get_Cross_Matrix(Rri);
-			Matrix4x4 Temp = crossMatrix * I_ref.inverse * crossMatrix;
-			K.SetColumn(0, K.GetColumn(0) - Temp.GetColumn(0));
-			K.SetColumn(1, K.GetColumn(1) - Temp.GetColumn(1));
-			K.SetColumn(2, K.GetColumn(2) - Temp.GetColumn(2));
-			K.SetColumn(3, K.GetColumn(3) - Temp.GetColumn(3));
+			Matrix4x4 tempMatrix = crossMatrix * I_ref.inverse * crossMatrix;
+			// Naive matrix subtraction
+			K.SetColumn(0, K.GetColumn(0) - tempMatrix.GetColumn(0));
+			K.SetColumn(1, K.GetColumn(1) - tempMatrix.GetColumn(1));
+			K.SetColumn(2, K.GetColumn(2) - tempMatrix.GetColumn(2));
+			K.SetColumn(3, K.GetColumn(3) - tempMatrix.GetColumn(3));
 
+			//
+			// Impulse
+			//
 			Vector3 j = K.inverse.MultiplyPoint3x4(viNew - vi);
 
+			//
+			// Update velocity with impulse
+			//
 			v = v + j * inversedMass;
 			w = w + I_ref.inverse.MultiplyPoint3x4(Vector3.Cross(Rri, j));
 		}
@@ -130,7 +156,7 @@ public class Rigid_Bunny : MonoBehaviour
 	void Update_Angular_Velocity()
 	{
 		//
-		// Gravity do not create rotation
+		// Gravity does not create rotation
 		//
 		w *= angular_decay;
 	}

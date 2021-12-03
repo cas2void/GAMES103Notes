@@ -10,9 +10,14 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 	Vector3[] V;
 	Matrix4x4 QQt = Matrix4x4.zero;
 
-	Vector3 gravity     = new Vector3(0.0f, -9.8f, 0.0f);
-	public float energy_lost = 0.3f;
+	Vector3 gravity = new Vector3(0.0f, -9.8f, 0.0f);
+
+	public float bounce_energy_decay = 0.3f;
 	public float velocity_decay	= 0.999f;
+
+	Vector3 original_position;
+	Quaternion original_rotation;
+	Vector3[] original_vertices;
 
     // Start is called before the first frame update
     void Start()
@@ -22,8 +27,12 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
         X = mesh.vertices;
         Q = mesh.vertices;
 
-        // Centerizing Q.
-        Vector3 c = Vector3.zero;
+		original_position = transform.position;
+		original_rotation = transform.rotation;
+		original_vertices = mesh.vertices;
+
+		// Centerizing Q.
+		Vector3 c = Vector3.zero;
         for (int i = 0; i < Q.Length; i++)
 		{
 			c += Q[i];
@@ -49,15 +58,9 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 		}
 		QQt[3, 3] = 1;
 
-		for(int i = 0; i < X.Length; i++)
-		{
-			V[i][0] = 4.0f;
-		}
-
-		Update_Mesh(transform.position, Matrix4x4.Rotate(transform.rotation), 0);
-		transform.position = Vector3.zero;
-		transform.rotation = Quaternion.identity;
-   	}
+		Reset();
+		Launch();
+    }
 
    	// Polar Decomposition that returns the rotation from F.
    	Matrix4x4 Get_Rotation(Matrix4x4 F)
@@ -186,20 +189,49 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 		}	
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
 		mesh.vertices = X;
-		mesh.RecalculateNormals();
+
+		Fix_Shading_Issue();
    	}
 
-	void Collision_Response(Vector3 P, Vector3 N, float inv_dt)
+    void Reset()
+	{
+		launched = false;
+
+		for (int i = 0; i < X.Length; i++)
+		{
+			V[i] = Vector3.zero;
+		}
+		X = original_vertices;
+
+		Update_Mesh(original_position, Matrix4x4.Rotate(original_rotation), 0);
+		transform.position = Vector3.zero;
+		transform.rotation = Quaternion.identity;
+	}
+
+	void Launch()
+    {
+		for (int i = 0; i < X.Length; i++)
+		{
+			V[i][0] = 4.0f;
+		}
+
+		launched = true;
+	}
+
+    void Collision_Response(Vector3 P, Vector3 N, float inv_dt)
 	{
 		for (int i = 0; i < X.Length; i++)
 		{
 			float phix = Vector3.Dot(X[i] - P, N);
 			if (phix < 0)
 			{
+				//
+				// According to the paper, reflect velocity vector on normal with energy lost
+				//
 				if (Vector3.Dot(V[i], N) < 0)
 				{
 					Vector3 reflected = Vector3.Reflect(V[i], N);
-					V[i] = reflected * energy_lost;
+					V[i] = reflected * bounce_energy_decay;
 				}
 				X[i] += -phix * N;
 				V[i] += -phix * N * inv_dt;
@@ -213,51 +245,70 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 		Collision_Response(new Vector3(2, 0, 0), new Vector3(-1, 0, 0), inv_dt);
 	}
 
+	void Fix_Shading_Issue()
+    {
+		Mesh mesh = GetComponent<MeshFilter>().mesh;
+		mesh.RecalculateNormals();
+	}
+
     // Update is called once per frame
     void Update()
     {
   		float dt = 0.015f;
 
-  		// Step 1: run a simple particle system.
-        for (int i = 0; i < V.Length; i++)
+		// Game Control
+		if (Input.GetKey("r"))
+		{
+			Reset();
+		}
+		if (Input.GetKey("l"))
+		{
+			Launch();
+		}
+
+		if (launched)
         {
-			V[i] += gravity * dt;
-			V[i] *= velocity_decay;
-			X[i] += V[i] * dt;
-        }
+			// Step 1: run a simple particle system.
+			for (int i = 0; i < V.Length; i++)
+			{
+				V[i] += gravity * dt;
+				V[i] *= velocity_decay;
+				X[i] += V[i] * dt;
+			}
 
-        //Step 2: Perform simple particle collision.
-		Collision(1 / dt);
+			// Step 2: Perform simple particle collision.
+			Collision(1 / dt);
 
-		// Step 3: Use shape matching to get new translation c and 
-		// new rotation R. Update the mesh by c and R.
-        //Shape Matching (translation)
-		Vector3 c = Vector3.zero;
-		for (int i = 0; i < X.Length; i++)
-		{
-			c += X[i];
+			// Step 3: Use shape matching to get new translation c and 
+			// new rotation R. Update the mesh by c and R.
+			//Shape Matching (translation)
+			Vector3 c = Vector3.zero;
+			for (int i = 0; i < X.Length; i++)
+			{
+				c += X[i];
+			}
+			c /= X.Length;
+
+			//Shape Matching (rotation)
+			Matrix4x4 ALeft = Matrix4x4.zero;
+			for (int i = 0; i < X.Length; i++)
+			{
+				Vector3 offset = X[i] - c;
+				ALeft[0, 0] += offset[0] * Q[i][0];
+				ALeft[0, 1] += offset[0] * Q[i][1];
+				ALeft[0, 2] += offset[0] * Q[i][2];
+				ALeft[1, 0] += offset[1] * Q[i][0];
+				ALeft[1, 1] += offset[1] * Q[i][1];
+				ALeft[1, 2] += offset[1] * Q[i][2];
+				ALeft[2, 0] += offset[2] * Q[i][0];
+				ALeft[2, 1] += offset[2] * Q[i][1];
+				ALeft[2, 2] += offset[2] * Q[i][2];
+			}
+			ALeft[3, 3] = 1;
+			Matrix4x4 A = ALeft * QQt.inverse;
+			Matrix4x4 R = Get_Rotation(A);
+
+			Update_Mesh(c, R, 1 / dt);
 		}
-		c /= X.Length;
-		
-		//Shape Matching (rotation)
-		Matrix4x4 ALeft = Matrix4x4.zero;
-		for (int i = 0; i < X.Length; i++)
-		{
-			Vector3 offset = X[i] - c;
-			ALeft[0, 0] += offset[0] * Q[i][0];
-			ALeft[0, 1] += offset[0] * Q[i][1];
-			ALeft[0, 2] += offset[0] * Q[i][2];
-			ALeft[1, 0] += offset[1] * Q[i][0];
-			ALeft[1, 1] += offset[1] * Q[i][1];
-			ALeft[1, 2] += offset[1] * Q[i][2];
-			ALeft[2, 0] += offset[2] * Q[i][0];
-			ALeft[2, 1] += offset[2] * Q[i][1];
-			ALeft[2, 2] += offset[2] * Q[i][2];
-		}
-		ALeft[3, 3] = 1;
-		Matrix4x4 A = ALeft * QQt.inverse;
-		Matrix4x4 R = Get_Rotation(A);
-		
-		Update_Mesh(c, R, 1 / dt);
-    }
+	}
 }
