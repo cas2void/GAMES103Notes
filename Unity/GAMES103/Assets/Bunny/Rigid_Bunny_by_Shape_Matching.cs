@@ -10,8 +10,9 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 	Vector3[] V;
 	Matrix4x4 QQt = Matrix4x4.zero;
 
-	// float restitution 	= 0.5f;					// for collision
 	Vector3 gravity     = new Vector3(0.0f, -9.8f, 0.0f);
+	public float energy_lost = 0.3f;
+	public float velocity_decay	= 0.999f;
 
     // Start is called before the first frame update
     void Start()
@@ -185,6 +186,7 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 		}	
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
 		mesh.vertices = X;
+		mesh.RecalculateNormals();
    	}
 
 	void Collision_Response(Vector3 P, Vector3 N, float inv_dt)
@@ -197,9 +199,10 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
 				if (Vector3.Dot(V[i], N) < 0)
 				{
 					Vector3 reflected = Vector3.Reflect(V[i], N);
-					V[i] = reflected;
-					X[i] += phix * N;
+					V[i] = reflected * energy_lost;
 				}
+				X[i] += -phix * N;
+				V[i] += -phix * N * inv_dt;
 			}
 		}
 	}
@@ -219,6 +222,7 @@ public class Rigid_Bunny_by_Shape_Matching : MonoBehaviour
         for (int i = 0; i < V.Length; i++)
         {
 			V[i] += gravity * dt;
+			V[i] *= velocity_decay;
 			X[i] += V[i] * dt;
         }
 
