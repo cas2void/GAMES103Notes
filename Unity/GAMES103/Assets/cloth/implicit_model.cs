@@ -165,16 +165,16 @@ public class implicit_model : MonoBehaviour
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
 		Vector3[] X = mesh.vertices;
 		
-		//Handle colllision.
+		// Handle colllision.
 
 		mesh.vertices = X;
 	}
 
 	void Get_Gradient(Vector3[] X, Vector3[] X_hat, float t, Vector3[] G)
 	{
-		//Momentum and Gravity.
+		// Momentum and Gravity.
 		
-		//Spring Force.
+		// Spring Force.
 		
 	}
 
@@ -187,17 +187,17 @@ public class implicit_model : MonoBehaviour
 		Vector3[] X_hat 	= new Vector3[X.Length];
 		Vector3[] G 		= new Vector3[X.Length];
 
-		//Initial Setup.
+		// Initial Setup.
 
 		for(int k = 0; k < 32; k++)
 		{
 			Get_Gradient(X, X_hat, t, G);
 			
-			//Update X by gradient.
+			// Update X by gradient.
 			
 		}
 
-		//Finishing.
+		// Finishing.
 		
 		mesh.vertices = X;
 
