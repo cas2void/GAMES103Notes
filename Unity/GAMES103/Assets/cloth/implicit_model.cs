@@ -4,14 +4,17 @@ using UnityEngine;
 
 public class implicit_model : MonoBehaviour
 {
-	float 		t 		= 0.0333f;
-	float 		mass	= 1;
-	float		damping	= 0.99f;
-	float 		rho		= 0.995f;
+	float 		t 		 = 0.0333f;
+	float 		mass	 = 1;
+	float		damping	 = 0.99f;
+	float 		rho		 = 0.995f;
 	float 		spring_k = 8000;
 	int[] 		E;
 	float[] 	L;
 	Vector3[] 	V;
+
+	Vector3 gravity = new Vector3(0.0f, -9.8f, 0.0f);
+	GameObject sphere;
 
     // Start is called before the first frame update
     void Start()
@@ -23,7 +26,7 @@ public class implicit_model : MonoBehaviour
 		Vector3[] X  	= new Vector3[n * n];
 		Vector2[] UV 	= new Vector2[n * n];
 		int[] triangles	= new int[(n - 1) * (n - 1) * 6];
-		for(int j = 0; j < n; j++)
+		for (int j = 0; j < n; j++)
         {
 			for (int i = 0; i < n; i++)
 			{
@@ -33,7 +36,7 @@ public class implicit_model : MonoBehaviour
 		}
 		
 		int t = 0;
-		for(int j = 0; j < n-1; j++)
+		for (int j = 0; j < n - 1; j++)
         {
 			for (int i = 0; i < n - 1; i++)
 			{
@@ -50,7 +53,7 @@ public class implicit_model : MonoBehaviour
 		mesh.vertices = X;
 		mesh.triangles = triangles;
 		mesh.uv = UV;
-		mesh.RecalculateNormals ();
+		mesh.RecalculateNormals();
 
 		// Construct the original E
 		int[] _E = new int[triangles.Length * 2];
@@ -94,7 +97,7 @@ public class implicit_model : MonoBehaviour
 			}
 		}
 
-		L = new float[E.Length/2];
+		L = new float[E.Length / 2];
 		for (int e = 0; e < E.Length / 2; e++) 
 		{
 			int v0 = E[e * 2 + 0];
@@ -107,6 +110,9 @@ public class implicit_model : MonoBehaviour
         {
 			V[i] = new Vector3(0, 0, 0);
 		}
+
+		// Cache the sphere object for performance reasons
+		sphere = GameObject.Find("Sphere");
     }
 
     void Quick_Sort(ref int[] a, int l, int r)
@@ -164,8 +170,28 @@ public class implicit_model : MonoBehaviour
 	{
 		Mesh mesh = GetComponent<MeshFilter>().mesh;
 		Vector3[] X = mesh.vertices;
-		
+
+		Vector3 c = sphere.transform.position;
+		float r = 2.7f;
+
 		// Handle colllision.
+		for (int i = 0; i < X.Length; i++)
+        {
+			if (i == 0 || i == 20)
+			{
+				continue;
+			}
+
+			Vector3 centerToVertex = X[i] - c;
+			float distance = centerToVertex.magnitude;
+			if (distance < r && distance > 0)
+            {
+				Vector3 centerToVertexNormalized = centerToVertex / distance;
+				Vector3 targetPosition = c + r * centerToVertexNormalized;
+				V[i] += (targetPosition - X[i]) / t;
+				X[i] = targetPosition;
+            }
+		}
 
 		mesh.vertices = X;
 	}
@@ -173,9 +199,23 @@ public class implicit_model : MonoBehaviour
 	void Get_Gradient(Vector3[] X, Vector3[] X_hat, float t, Vector3[] G)
 	{
 		// Momentum and Gravity.
-		
+		for (int i = 0; i < X.Length; i++)
+        {
+			G[i] = (X[i] - X_hat[i]) * mass / (t * t) - gravity;
+        }
+
 		// Spring Force.
-		
+		for (int e = 0; e < E.Length / 2; e++)
+		{
+			int v0 = E[e * 2 + 0];
+			int v1 = E[e * 2 + 1];
+			Vector3 edgeVector = X[v0] - X[v1];
+			float edgeLength = edgeVector.magnitude;
+
+			Vector3 force = spring_k * (1 - L[e] / edgeLength) * edgeVector;
+			G[v0] += force;
+			G[v1] -= force;
+		}
 	}
 
     // Update is called once per frame
@@ -188,16 +228,46 @@ public class implicit_model : MonoBehaviour
 		Vector3[] G 		= new Vector3[X.Length];
 
 		// Initial Setup.
+		for (int i = 0; i < X.Length; i++)
+        {
+			if (i == 0 || i == 20)
+            {
+				V[i] = Vector3.zero;
+				X_hat[i] = X[i];
+            }
+            else
+            {
+				V[i] *= damping;
+				X_hat[i] = X[i] + t * V[i];
+				X[i] = X_hat[i];
+			}
+        }
 
-		for(int k = 0; k < 32; k++)
+		float inversedT = 1.0f / t;
+		for (int k = 0; k < 32; k++)
 		{
 			Get_Gradient(X, X_hat, t, G);
 			
 			// Update X by gradient.
-			
+			for (int i = 0; i < X.Length; i++)
+            {
+				if (i == 0 || i == 20)
+				{
+					continue;
+				}
+				X[i] -= G[i] / (mass * inversedT * inversedT + 4 * spring_k);
+            }
 		}
 
 		// Finishing.
+		for (int i = 0; i < X.Length; i++)
+        {
+			if (i == 0 || i == 20)
+            {
+				continue;
+            }
+			V[i] += (X[i] - X_hat[i]) * inversedT;
+        }
 		
 		mesh.vertices = X;
 

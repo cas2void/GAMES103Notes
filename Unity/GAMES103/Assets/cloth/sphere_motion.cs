@@ -3,8 +3,8 @@ using System.Collections;
 
 public class sphere_motion : MonoBehaviour {
 
-	bool 	pressed=false;
-	bool 	sphere_move=false;
+	bool 	pressed = false;
+	bool 	sphere_move = false;
 	Vector3 offset;
 
 	// Use this for initialization
@@ -19,7 +19,7 @@ public class sphere_motion : MonoBehaviour {
 		{
 			pressed = true;
 			Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-			if(Vector3.Cross(ray.direction, transform.position - ray.origin).magnitude < 2.5f)
+			if (Vector3.Cross(ray.direction, transform.position - ray.origin).magnitude < 2.5f)
             {
 				sphere_move = true;
 			}
@@ -34,9 +34,9 @@ public class sphere_motion : MonoBehaviour {
 			pressed = false;
 		}
 
-		if(pressed)
+		if (pressed)
 		{
-			if(sphere_move)
+			if (sphere_move)
 			{
 				Vector3 mouse=Input.mousePosition;
 				mouse -= offset;
