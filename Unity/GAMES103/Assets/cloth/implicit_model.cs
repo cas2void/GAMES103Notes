@@ -4,17 +4,18 @@ using UnityEngine;
 
 public class implicit_model : MonoBehaviour
 {
-    float       t         = 0.0333f;
-    float       mass      = 1;
-    float       damping   = 0.99f;
-    float       rho       = 0.995f;
-    float       spring_k  = 8000;
+    float       t              = 0.0333f;
+    float       mass           = 1;
+    float       damping        = 0.99f;
+    float       rho            = 0.995f;
+    float       spring_k       = 8000;
     int[]       E;
     float[]     L;
     Vector3[]   V;
 
-    Vector3     gravity   = new Vector3(0.0f, -9.8f, 0.0f);
+    Vector3     gravity        = new Vector3(0.0f, -9.8f, 0.0f);
     GameObject  sphere;
+    bool        use_chebyshev  = false;
 
     // Start is called before the first frame update
     void Start()
@@ -323,9 +324,14 @@ public class implicit_model : MonoBehaviour
         //
         // Similar Outcome.
         //
-
-        //Kindof_Newton_Method(X, X_hat, t, G);
-        Chebyshev_Acceleration(X, X_hat, t, G);
+        if (use_chebyshev)
+        {
+            Chebyshev_Acceleration(X, X_hat, t, G);
+        }
+        else
+        {
+            Kindof_Newton_Method(X, X_hat, t, G);
+        }
 
         // Finishing.
         for (int i = 0; i < X.Length; i++)
