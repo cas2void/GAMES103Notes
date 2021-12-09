@@ -3,13 +3,15 @@ using System.Collections;
 
 public class PBD_model: MonoBehaviour {
 
-	float 		t        = 0.0333f;
-	float		damping  = 0.99f;
-	int[] 		E;
-	float[] 	L;
-	Vector3[] 	V;
+    float       t        = 0.0333f;
+    float       damping  = 0.99f;
+    int[]       E;
+    float[]     L;
+    Vector3[]   V;
 
-    GameObject sphere;
+
+    Vector3     gravity  = new Vector3(0.0f, -9.8f, 0.0f);
+    GameObject  sphere;
 
     // Use this for initialization
     void Start()
@@ -161,18 +163,52 @@ public class PBD_model: MonoBehaviour {
         b = temp;
     }
 
-    void Strain_Limiting()
-	{
-		Mesh mesh = GetComponent<MeshFilter> ().mesh;
-		Vector3[] vertices = mesh.vertices;
+    void Strain_Limiting(float t)
+    {
+        Mesh mesh = GetComponent<MeshFilter>().mesh;
+        Vector3[] vertices = mesh.vertices;
 
-		//Apply PBD here.
-		//...
-		mesh.vertices = vertices;
-	}
+        // Apply PBD here.
+        Vector3[] sum_x = new Vector3[vertices.Length];
+        int[] sum_n = new int[vertices.Length];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            sum_x[i] = Vector3.zero;
+            sum_n[i] = 0;
+        }
 
-	void Collision_Handling(float t)
-	{
+        for (int e = 0; e < E.Length / 2; e++)
+        {
+            int v0 = E[e * 2 + 0];
+            int v1 = E[e * 2 + 1];
+            Vector3 edgeVector = vertices[v0] - vertices[v1];
+            float edgeLength = edgeVector.magnitude;
+
+            Vector3 sumVertice = vertices[v0] + vertices[v1];
+            Vector3 modifiedEdge = L[e] * edgeVector / edgeLength;
+            sum_x[v0] += 0.5f * (sumVertice + modifiedEdge);
+            sum_x[v1] += 0.5f * (sumVertice - modifiedEdge);
+            sum_n[v0] += 1;
+            sum_n[v1] += 1;
+        }
+
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            if (i == 0 || i == 20)
+            {
+                continue;
+            }
+
+            Vector3 targetPosition = (0.2f * vertices[i] + sum_x[i]) / (0.2f + sum_n[i]);
+            V[i] += (targetPosition - vertices[i]) / t;
+            vertices[i] = targetPosition;
+        }
+
+        mesh.vertices = vertices;
+    }
+
+    void Collision_Handling(float t)
+    {
         Mesh mesh = GetComponent<MeshFilter>().mesh;
         Vector3[] X = mesh.vertices;
 
@@ -199,28 +235,31 @@ public class PBD_model: MonoBehaviour {
         }
 
         mesh.vertices = X;
-	}
+    }
 
-	// Update is called once per frame
-	void Update () 
-	{
-		Mesh mesh = GetComponent<MeshFilter>().mesh;
-		Vector3[] X = mesh.vertices;
+    // Update is called once per frame
+    void Update () 
+    {
+        Mesh mesh = GetComponent<MeshFilter>().mesh;
+        Vector3[] X = mesh.vertices;
 
-		for (int i = 0; i < X.Length; i++)
-		{
-			if (i == 0 || i == 20)
+        for (int i = 0; i < X.Length; i++)
+        {
+            if (i == 0 || i == 20)
             {
                 continue;
             }
-			//Initial Setup
-			//...
-		}
-		mesh.vertices = X;
 
-		for (int l = 0; l < 32; l++)
+            // Initial Setup
+            V[i] *= damping;
+            V[i] += gravity * t;
+            X[i] += V[i] * t;
+        }
+        mesh.vertices = X;
+
+        for (int l = 0; l < 32; l++)
         {
-            Strain_Limiting();
+            Strain_Limiting(t);
         }
 
         // Collision Handling as Post Processing.
@@ -228,6 +267,6 @@ public class PBD_model: MonoBehaviour {
 
         // Shading.
         mesh.RecalculateNormals();
-	}
+    }
 }
 
