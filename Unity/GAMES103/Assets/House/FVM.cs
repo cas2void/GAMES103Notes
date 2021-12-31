@@ -27,7 +27,9 @@ public class FVM : MonoBehaviour
 	int[] V_num;
 
     Vector3 gravity     = new Vector3(0.0f, -9.8f, 0.0f);
-    float restitution   = 0.5f;                   // for collision
+    float restitution   = 0.5f;                            // for collision
+
+    bool useSVD = false;
 
     SVD svd = new SVD();
 
@@ -228,43 +230,75 @@ public class FVM : MonoBehaviour
             Matrix4x4 EdgeMatrix = Build_Edge_Matrix(tet);
             Matrix4x4 F = EdgeMatrix * inv_Dm[tet];
 
-            // Green Strain
-            // G = (F^T * F - I) / 2
-            Matrix4x4 G = F.transpose * F;
-            G.m00 = (G.m00 - 1.0f) * 0.5f;
-            G.m01 *= 0.5f;
-            G.m02 *= 0.5f;
+            // PK Stress
+            Matrix4x4 P = Matrix4x4.identity;
 
-            G.m10 *= 0.5f;
-            G.m11 = (G.m11 - 1.0f) * 0.5f;
-            G.m12 *= 0.5f;
+            if (useSVD)
+            {
+                Matrix4x4 U = Matrix4x4.identity;
+                Matrix4x4 S = Matrix4x4.identity;
+                Matrix4x4 V = Matrix4x4.identity;
 
-            G.m20 *= 0.5f;
-            G.m22 = (G.m22 - 1.0f) * 0.5f;
-            G.m22 *= 0.5f;
+                svd.svd(F, ref U, ref S, ref V);
+                float sigma0 = S.m00;
+                float sigma1 = S.m11;
+                float sigma2 = S.m22;
 
-            // Second PK Stress
-            // S = 2 * s1 * G + s0 * tr(G) * I,
-            Matrix4x4 S = Matrix4x4.zero;
-            float trace = G[0, 0] + G[1, 1] + G[2, 2];
+                float I = sigma0 * sigma0 + sigma1 * sigma1 + sigma2 * sigma2;
+                float dEdI = stiffness_0 * (I - 3.0f) * 0.25f - stiffness_1 * 0.5f;
+                float dEdII = stiffness_1 * 0.25f;
+                float P0 = 2 * dEdI * sigma0 + 4 * dEdII * sigma0 * sigma0 * sigma0;
+                float P1 = 2 * dEdI * sigma1 + 4 * dEdII * sigma1 * sigma1 * sigma1;
+                float P2 = 2 * dEdI * sigma2 + 4 * dEdII * sigma2 * sigma2 * sigma2;
 
-            float coffa = 2.0f * stiffness_1;
-            float coffb = stiffness_0 * trace;
-            S.m00 = coffa * G.m00 + coffb;
-            S.m01 = coffa * G.m01;
-            S.m02 = coffa * G.m02;
+                Matrix4x4 diag = Matrix4x4.identity;
+                diag.m00 = P0;
+                diag.m11 = P1;
+                diag.m22 = P2;
 
-            S.m10 = coffa * G.m10;
-            S.m11 = coffa * G.m11 + coffb;
-            S.m12 = coffa * G.m12;
+                P = U * diag * V.transpose;
+            }
+            else
+            {
+                // Green Strain
+                // G = (F^T * F - I) / 2
+                Matrix4x4 G = F.transpose * F;
+                G.m00 = (G.m00 - 1.0f) * 0.5f;
+                G.m01 *= 0.5f;
+                G.m02 *= 0.5f;
 
-            S.m20 = coffa * G.m20;
-            S.m21 = coffa * G.m21;
-            S.m22 = coffa * G.m22 + coffb;
+                G.m10 *= 0.5f;
+                G.m11 = (G.m11 - 1.0f) * 0.5f;
+                G.m12 *= 0.5f;
+
+                G.m20 *= 0.5f;
+                G.m22 = (G.m22 - 1.0f) * 0.5f;
+                G.m22 *= 0.5f;
+
+                // Second PK Stress
+                // S = 2 * s1 * G + s0 * tr(G) * I,
+                Matrix4x4 S = Matrix4x4.zero;
+                float trace = G[0, 0] + G[1, 1] + G[2, 2];
+
+                float coffa = 2.0f * stiffness_1;
+                float coffb = stiffness_0 * trace;
+                S.m00 = coffa * G.m00 + coffb;
+                S.m01 = coffa * G.m01;
+                S.m02 = coffa * G.m02;
+
+                S.m10 = coffa * G.m10;
+                S.m11 = coffa * G.m11 + coffb;
+                S.m12 = coffa * G.m12;
+
+                S.m20 = coffa * G.m20;
+                S.m21 = coffa * G.m21;
+                S.m22 = coffa * G.m22 + coffb;
+                P = F * S;
+            }
 
             // Elastic Force
-            // Force matrix = F * S * Dm^(-T) / (6 * det(Dm^-1))
-            Matrix4x4 ForceMat = F * S * inv_Dm[tet].transpose;
+            // Force matrix = P * Dm^(-T) / (-6 * det(Dm^-1))
+            Matrix4x4 ForceMat = P * inv_Dm[tet].transpose;
             float det = inv_Dm[tet].determinant;
             float coff = -1.0f / (6.0f * det);
             ForceMat.m00 *= coff;
@@ -292,16 +326,13 @@ public class FVM : MonoBehaviour
 
         for (int i = 0; i < number; i++)
     	{
-            // Update X and V here.
+            // Update V here.
             V[i] += Force[i] / mass * dt;
             V[i] *= damp;
-            //X[i] += V[i] * dt;
 
+            // Prepare smoothing
             V_sum[i] = Vector3.zero;
             V_num[i] = 0;
-
-            //// (Particle) collision with floor.
-            //Collision_Impulse(ref X[i], ref V[i], new Vector3(0, -2.99f, 0), new Vector3(0, 1, 0));
         }
 
         // Laplacian smoothing
@@ -312,16 +343,27 @@ public class FVM : MonoBehaviour
                 int index = Tet[tet * 4 + i];
                 V_sum[index] += V[index];
                 V_num[index] += 1;
+                for (int j = 0; j < 4; j++)
+                {
+                    if (i != j)
+                    {
+                        int otherIndex = Tet[tet * 4 + j];
+                        V_sum[index] += V[otherIndex];
+                        V_num[index] += 1;
+                    }
+                }
             }
         }
 
         for (int i = 0; i < number; i++)
         {
+            // Average velocity as smoothing
             if (V_num[i] > 1)
             {
                 V[i] = V_sum[i] / V_num[i];
             }
-            //V[i] *= damp;
+
+            // Update X here.
             X[i] += V[i] * dt;
 
             // (Particle) collision with floor.
