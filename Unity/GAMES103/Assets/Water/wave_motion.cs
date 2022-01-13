@@ -186,7 +186,38 @@ public class wave_motion : MonoBehaviour
     void Shallow_Wave(float[,] old_h, float[,] h, float[,] new_h)
     {
         //Step 1:
-        //TODO: Compute new_h based on the shallow wave model.
+        // Compute new_h based on the shallow wave model.
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                // Neumann boundary conditions
+                int lowerI = i - 1;
+                int upperI = i + 1;
+                int lowerJ = j - 1;
+                int upperJ = j + 1;
+
+                if (i == 0)
+                {
+                    lowerI = i;
+                }
+                else if (i == size - 1)
+                {
+                    upperI = i;
+                }
+
+                if (j == 0)
+                {
+                    lowerJ = j;
+                }
+                else if (j == size - 1)
+                {
+                    upperJ = j;
+                }
+
+                new_h[i, j] = h[i, j] + (h[i, j] - old_h[i, j]) * damping + (h[lowerI, j] + h[upperI, j] + h[i, lowerJ] + h[i, upperJ] - 4.0f * h[i, j]) * rate;
+            }
+        }
 
         //Step 2: Block->Water coupling
         //TODO: for block 1, calculate low_h.
@@ -203,6 +234,14 @@ public class wave_motion : MonoBehaviour
 
         //Step 3
         //TODO: old_h <- h; h <- new_h;
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                old_h[i, j] = h[i, j];
+                h[i, j] = new_h[i, j];
+            }
+        }
 
         //Step 4: Water->Block coupling.
         //More TODO here.
@@ -217,7 +256,7 @@ public class wave_motion : MonoBehaviour
         float[,] new_h = new float[size, size];
         float[,] h = new float[size, size];
 
-        //TODO: Load X.y into h.
+        // Load X.y into h.
         for (int i = 0; i < size; i++)
         {
             for (int j = 0; j < size; j++)
@@ -228,7 +267,15 @@ public class wave_motion : MonoBehaviour
 
         if (Input.GetKeyDown("r"))
         {
-            //TODO: Add random water.
+            // Add random water.
+            int randomI = Random.Range(1, size - 2);
+            int randomJ = Random.Range(1, size - 2);
+            float randomR = Random.Range(0.2f, 0.8f);
+            h[randomI, randomJ] = randomR;
+            h[randomI - 1, randomJ] = -randomR / 4.0f;
+            h[randomI + 1, randomJ] = -randomR / 4.0f;
+            h[randomI, randomJ - 1] = -randomR / 4.0f;
+            h[randomI, randomJ + 1] = -randomR / 4.0f;
         }
 
         for (int l = 0; l < 8; l++)
@@ -236,7 +283,7 @@ public class wave_motion : MonoBehaviour
             Shallow_Wave(old_h, h, new_h);
         }
 
-        //TODO: Store h back into X.y and recalculate normal.
+        // Store h back into X.y and recalculate normal.
         for (int i = 0; i < size; i++)
         {
             for (int j = 0; j < size; j++)
