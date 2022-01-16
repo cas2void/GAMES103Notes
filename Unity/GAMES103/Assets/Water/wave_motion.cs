@@ -5,7 +5,7 @@ public class wave_motion : MonoBehaviour
 {
     int size = 100;
     float rate = 0.005f;
-    float gamma = 0.004f;
+    float gamma = 0.001f;
     float damping = 0.996f;
     float[,] old_h;
     float[,] low_h;
@@ -16,11 +16,12 @@ public class wave_motion : MonoBehaviour
     float[,] cg_p;
     float[,] cg_r;
     float[,] cg_Ap;
-    bool tag = true;
 
     Vector3 cube_v = Vector3.zero;
     Vector3 cube_w = Vector3.zero;
 
+    GameObject cube;
+    GameObject block;
 
     // Use this for initialization
     void Start()
@@ -78,6 +79,9 @@ public class wave_motion : MonoBehaviour
                 vh[i, j] = 0;
             }
         }
+
+        cube = GameObject.Find("Cube");
+        block = GameObject.Find("Block");
     }
 
     void A_Times(bool[,] mask, float[,] x, float[,] Ax, int li, int ui, int lj, int uj)
@@ -183,7 +187,95 @@ public class wave_motion : MonoBehaviour
 
     }
 
-    void Shallow_Wave(float[,] old_h, float[,] h, float[,] new_h)
+    void Neumann_Boundry(int i, int j, out int li, out int ui, out int lj, out int uj)
+    {
+        li = i - 1;
+        ui = i + 1;
+        lj = j - 1;
+        uj = j + 1;
+
+        if (i == 0)
+        {
+            li = i;
+        }
+        else if (i == size - 1)
+        {
+            ui = i;
+        }
+
+        if (j == 0)
+        {
+            lj = j;
+        }
+        else if (j == size - 1)
+        {
+            uj = j;
+        }
+    }
+
+    void SolveVirtualHeight(GameObject gameObject, float[,] virtualHeight, float[,] new_h, Vector3[,] vertices)
+    {
+        // Renderer and Collider components' bounds are measured in world space 
+        Bounds bounds = gameObject.GetComponent<Collider>().bounds;
+        
+        // Contact range
+        int li = size - 1;
+        int ui = 0;
+        int lj = size - 1;
+        int uj = 0;
+
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                if (bounds.Contains(vertices[i, j]))
+                {
+                    // Arbitrary water bottom, -10 is enough for this demo.
+                    float bottom = -10.0f;
+                    // Shoot ray up from bottom
+                    Ray ray = new Ray(new Vector3(vertices[i, j].x, bottom, vertices[i, j].z), Vector3.up);
+                    float distanceFromBottom;
+                    if (bounds.IntersectRay(ray, out distanceFromBottom))
+                    {
+                        // Update contact range
+                        if (i < li)
+                        {
+                            li = i;
+                        }
+                        else if (i > ui)
+                        {
+                            ui = i;
+                        }
+
+                        if (j < lj)
+                        {
+                            lj = j;
+                        }
+                        else if (j > uj)
+                        {
+                            uj = j;
+                        }
+
+                        // If contact, set depth as desired height
+                        cg_mask[i, j] = true;
+                        low_h[i, j] = bottom + distanceFromBottom;
+                    }
+                    else
+                    {
+                        // No contact
+                        cg_mask[i, j] = false;
+                        low_h[i, j] = new_h[i, j];
+                    }
+
+                    b[i, j] = (new_h[i, j] - low_h[i, j]) / rate;
+                }
+            }
+        }
+
+        Conjugate_Gradient(cg_mask, b, virtualHeight, li, ui, lj, uj);
+    }
+
+    void Shallow_Wave(float[,] old_h, float[,] h, float[,] new_h, Vector3[,] vertices)
     {
         //Step 1:
         // Compute new_h based on the shallow wave model.
@@ -192,48 +284,45 @@ public class wave_motion : MonoBehaviour
             for (int j = 0; j < size; j++)
             {
                 // Neumann boundary conditions
-                int lowerI = i - 1;
-                int upperI = i + 1;
-                int lowerJ = j - 1;
-                int upperJ = j + 1;
-
-                if (i == 0)
-                {
-                    lowerI = i;
-                }
-                else if (i == size - 1)
-                {
-                    upperI = i;
-                }
-
-                if (j == 0)
-                {
-                    lowerJ = j;
-                }
-                else if (j == size - 1)
-                {
-                    upperJ = j;
-                }
-
+                Neumann_Boundry(i, j, out int lowerI, out int upperI, out int lowerJ, out int upperJ);
                 new_h[i, j] = h[i, j] + (h[i, j] - old_h[i, j]) * damping + (h[lowerI, j] + h[upperI, j] + h[i, lowerJ] + h[i, upperJ] - 4.0f * h[i, j]) * rate;
             }
         }
 
         //Step 2: Block->Water coupling
-        //TODO: for block 1, calculate low_h.
-        //TODO: then set up b and cg_mask for conjugate gradient.
-        //TODO: Solve the Poisson equation to obtain vh (virtual height).
+        // for block 1, calculate low_h.
+        // then set up b and cg_mask for conjugate gradient.
+        // Solve the Poisson equation to obtain vh (virtual height).
+        SolveVirtualHeight(block, vh, new_h, vertices);
 
-        //TODO: for block 2, calculate low_h.
-        //TODO: then set up b and cg_mask for conjugate gradient.
-        //TODO: Solve the Poisson equation to obtain vh (virtual height).
 
-        //TODO: Diminish vh.
+        // for block 2, calculate low_h.
+        // then set up b and cg_mask for conjugate gradient.
+        // Solve the Poisson equation to obtain vh (virtual height).
+        SolveVirtualHeight(cube, vh, new_h, vertices);
 
-        //TODO: Update new_h by vh.
+        // Diminish vh.
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                vh[i, j] *= gamma;
+            }
+        }
+
+        // Update new_h by vh.
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                // Neumann boundary conditions
+                Neumann_Boundry(i, j, out int lowerI, out int upperI, out int lowerJ, out int upperJ);
+                new_h[i, j] += (vh[lowerI, j] + vh[upperI, j] + vh[i, lowerJ] + vh[i, upperJ] - 4.0f * vh[i, j]) * rate;
+            }
+        }
 
         //Step 3
-        //TODO: old_h <- h; h <- new_h;
+        // old_h <- h; h <- new_h;
         for (int i = 0; i < size; i++)
         {
             for (int j = 0; j < size; j++)
@@ -255,6 +344,7 @@ public class wave_motion : MonoBehaviour
         Vector3[] X = mesh.vertices;
         float[,] new_h = new float[size, size];
         float[,] h = new float[size, size];
+        Vector3[,] vertices = new Vector3[size, size];
 
         // Load X.y into h.
         for (int i = 0; i < size; i++)
@@ -262,6 +352,7 @@ public class wave_motion : MonoBehaviour
             for (int j = 0; j < size; j++)
             {
                 h[i, j] = X[i * size + j].y;
+                vertices[i, j] = X[i * size + j];
             }
         }
 
@@ -280,7 +371,7 @@ public class wave_motion : MonoBehaviour
 
         for (int l = 0; l < 8; l++)
         {
-            Shallow_Wave(old_h, h, new_h);
+            Shallow_Wave(old_h, h, new_h, vertices);
         }
 
         // Store h back into X.y and recalculate normal.
