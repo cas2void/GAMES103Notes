@@ -5,7 +5,7 @@ public class wave_motion : MonoBehaviour
 {
     int size = 100;
     float rate = 0.005f;
-    float gamma = 0.001f;
+    float gamma = 0.002f;
     float damping = 0.996f;
     float[,] old_h;
     float[,] low_h;
@@ -22,6 +22,15 @@ public class wave_motion : MonoBehaviour
 
     GameObject cube;
     GameObject block;
+
+    float dt = 0.004f;
+    float mass;
+    Matrix4x4 I_ref;               // reference inertia
+    float linear_decay = 0.9999f;
+    float angular_decay = 0.98f;
+
+    Vector3 gravity = new Vector3(0.0f, -9.8f, 0.0f);
+    float buoyancy_scale = 0.3f;
 
     // Use this for initialization
     void Start()
@@ -82,6 +91,29 @@ public class wave_motion : MonoBehaviour
 
         cube = GameObject.Find("Cube");
         block = GameObject.Find("Block");
+
+        Vector3[] original_vertices = cube.GetComponent<MeshFilter>().mesh.vertices;
+
+        float m = 0.5f;
+        mass = 0;
+        for (int i = 0; i < original_vertices.Length; i++)
+        {
+            mass += m;
+            float diag = m * original_vertices[i].sqrMagnitude;
+            I_ref[0, 0] += diag;
+            I_ref[1, 1] += diag;
+            I_ref[2, 2] += diag;
+            I_ref[0, 0] -= m * original_vertices[i][0] * original_vertices[i][0];
+            I_ref[0, 1] -= m * original_vertices[i][0] * original_vertices[i][1];
+            I_ref[0, 2] -= m * original_vertices[i][0] * original_vertices[i][2];
+            I_ref[1, 0] -= m * original_vertices[i][1] * original_vertices[i][0];
+            I_ref[1, 1] -= m * original_vertices[i][1] * original_vertices[i][1];
+            I_ref[1, 2] -= m * original_vertices[i][1] * original_vertices[i][2];
+            I_ref[2, 0] -= m * original_vertices[i][2] * original_vertices[i][0];
+            I_ref[2, 1] -= m * original_vertices[i][2] * original_vertices[i][1];
+            I_ref[2, 2] -= m * original_vertices[i][2] * original_vertices[i][2];
+        }
+        I_ref[3, 3] = 1;
     }
 
     void A_Times(bool[,] mask, float[,] x, float[,] Ax, int li, int ui, int lj, int uj)
@@ -213,11 +245,13 @@ public class wave_motion : MonoBehaviour
         }
     }
 
-    void SolveVirtualHeight(GameObject gameObject, float[,] virtualHeight, float[,] new_h, Vector3[,] vertices)
+    void Solve_Virtual_Height(GameObject gameObject, float[,] virtualHeight, float[,] new_h, Vector3[,] vertices)
     {
+        BoxCollider collider = gameObject.GetComponent<BoxCollider>();
         // Renderer and Collider components' bounds are measured in world space 
-        Bounds bounds = gameObject.GetComponent<Collider>().bounds;
-        
+        Bounds bounds = collider.bounds;
+        float boundsCenterY = bounds.center.y;
+
         // Contact range
         int li = size - 1;
         int ui = 0;
@@ -228,14 +262,18 @@ public class wave_motion : MonoBehaviour
         {
             for (int j = 0; j < size; j++)
             {
-                if (bounds.Contains(vertices[i, j]))
+                // Initailize as no contact
+                cg_mask[i, j] = false;
+                low_h[i, j] = new_h[i, j];
+
+                Vector3 waterVertex = new Vector3(vertices[i, j].x, boundsCenterY, vertices[i, j].z);
+                if (bounds.Contains(waterVertex))
                 {
                     // Arbitrary water bottom, -10 is enough for this demo.
                     float bottom = -10.0f;
                     // Shoot ray up from bottom
-                    Ray ray = new Ray(new Vector3(vertices[i, j].x, bottom, vertices[i, j].z), Vector3.up);
-                    float distanceFromBottom;
-                    if (bounds.IntersectRay(ray, out distanceFromBottom))
+                    Ray ray = new Ray(new Vector3(waterVertex.x, bottom, waterVertex.z), Vector3.up);
+                    if (collider.Raycast(ray, out RaycastHit hitInfo, 100.0f))
                     {
                         // Update contact range
                         if (i < li)
@@ -257,14 +295,12 @@ public class wave_motion : MonoBehaviour
                         }
 
                         // If contact, set depth as desired height
-                        cg_mask[i, j] = true;
-                        low_h[i, j] = bottom + distanceFromBottom;
-                    }
-                    else
-                    {
-                        // No contact
-                        cg_mask[i, j] = false;
-                        low_h[i, j] = new_h[i, j];
+                        float depth = bottom + hitInfo.distance;
+                        if (depth < 0)
+                        {
+                            cg_mask[i, j] = true;
+                            low_h[i, j] = depth;
+                        }
                     }
 
                     b[i, j] = (new_h[i, j] - low_h[i, j]) / rate;
@@ -273,6 +309,83 @@ public class wave_motion : MonoBehaviour
         }
 
         Conjugate_Gradient(cg_mask, b, virtualHeight, li, ui, lj, uj);
+    }
+
+    void Water_Block_Coupling(GameObject gameObject, float[,] virtualHeight, Vector3[,] vertices)
+    {
+        BoxCollider collider = gameObject.GetComponent<BoxCollider>();
+        // Renderer and Collider components' bounds are measured in world space 
+        Bounds bounds = collider.bounds;
+        float boundsCenterY = bounds.center.y;
+
+        // Find all the vertice collided with the water
+        int numCollidingVertices = 0;
+        Vector3 sumCollidingPosition = Vector3.zero;
+        float sumVirtualHeight = 0.0f;
+
+        for (int i = 0; i < size; i++)
+        {
+            for (int j = 0; j < size; j++)
+            {
+                Vector3 waterVertex = new Vector3(vertices[i, j].x, boundsCenterY, vertices[i, j].z);
+                if (bounds.Contains(waterVertex))
+                {
+                    // Arbitrary water bottom, -10 is enough for this demo.
+                    float bottom = -10.0f;
+                    // Shoot ray up from bottom
+                    Ray ray = new Ray(new Vector3(waterVertex.x, bottom, waterVertex.z), Vector3.up);
+                    if (collider.Raycast(ray, out RaycastHit hitInfo, 100.0f))
+                    {
+                        if (virtualHeight[i, j] > 0)
+                        {
+                            numCollidingVertices++;
+                            sumCollidingPosition += hitInfo.point;
+                            sumVirtualHeight += virtualHeight[i, j];
+                        }
+                    }
+                }
+            }
+        }
+
+        // Buoyancy
+        Vector3 buoyancyForce = new Vector3(0.0f, sumVirtualHeight * -gravity.y * buoyancy_scale, 0.0f);
+
+        // Decay velocity
+        cube_v += gravity * dt;
+        cube_v *= linear_decay;
+
+        cube_w *= angular_decay;
+
+        // Update linear status
+        cube_v += buoyancyForce / mass * dt;
+        gameObject.transform.position += cube_v * dt;
+
+        // Calculate the torque
+        Vector3 tao = Vector3.zero;
+        if (numCollidingVertices > 0)
+        {
+            //
+            // Average of all collided vertices
+            //
+            Vector3 Rri = sumCollidingPosition / numCollidingVertices - gameObject.transform.position;
+            tao = Vector3.Cross(Rri, buoyancyForce) / mass;
+        }
+
+        // Update angular status
+        Matrix4x4 rotationMatrix = Matrix4x4.Rotate(gameObject.transform.rotation);
+        Matrix4x4 tempMatrix = rotationMatrix * I_ref * rotationMatrix.transpose;
+        cube_w += tempMatrix.inverse.MultiplyVector(tao);
+
+        Quaternion rotation = gameObject.transform.rotation;
+        Vector3 wt = cube_w * 0.5f * dt;
+        Quaternion deltaq = new Quaternion(wt.x, wt.y, wt.z, 0);
+        deltaq *= rotation;
+        rotation.x += deltaq.x;
+        rotation.y += deltaq.y;
+        rotation.z += deltaq.z;
+        rotation.w += deltaq.w;
+        rotation.Normalize();
+        gameObject.transform.rotation = rotation;
     }
 
     void Shallow_Wave(float[,] old_h, float[,] h, float[,] new_h, Vector3[,] vertices)
@@ -293,13 +406,13 @@ public class wave_motion : MonoBehaviour
         // for block 1, calculate low_h.
         // then set up b and cg_mask for conjugate gradient.
         // Solve the Poisson equation to obtain vh (virtual height).
-        SolveVirtualHeight(block, vh, new_h, vertices);
+        Solve_Virtual_Height(block, vh, new_h, vertices);
 
 
         // for block 2, calculate low_h.
         // then set up b and cg_mask for conjugate gradient.
         // Solve the Poisson equation to obtain vh (virtual height).
-        SolveVirtualHeight(cube, vh, new_h, vertices);
+        Solve_Virtual_Height(cube, vh, new_h, vertices);
 
         // Diminish vh.
         for (int i = 0; i < size; i++)
@@ -333,7 +446,9 @@ public class wave_motion : MonoBehaviour
         }
 
         //Step 4: Water->Block coupling.
-        //More TODO here.
+        // Attach rigid body dynamics with implicit integration.
+        // Here we couple water with the cube only, the same mechanics could be added to the block.
+        Water_Block_Coupling(cube, vh, vertices);
     }
 
 
@@ -361,12 +476,12 @@ public class wave_motion : MonoBehaviour
             // Add random water.
             int randomI = Random.Range(1, size - 2);
             int randomJ = Random.Range(1, size - 2);
-            float randomR = Random.Range(0.2f, 0.8f);
-            h[randomI, randomJ] = randomR;
-            h[randomI - 1, randomJ] = -randomR / 4.0f;
-            h[randomI + 1, randomJ] = -randomR / 4.0f;
-            h[randomI, randomJ - 1] = -randomR / 4.0f;
-            h[randomI, randomJ + 1] = -randomR / 4.0f;
+            float randomR = Random.Range(-0.2f, -0.1f);
+            h[randomI, randomJ] += randomR;
+            h[randomI - 1, randomJ] += -randomR / 4.0f;
+            h[randomI + 1, randomJ] += -randomR / 4.0f;
+            h[randomI, randomJ - 1] += -randomR / 4.0f;
+            h[randomI, randomJ + 1] += -randomR / 4.0f;
         }
 
         for (int l = 0; l < 8; l++)
